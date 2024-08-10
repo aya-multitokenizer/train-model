@@ -32,14 +32,14 @@ def sanity_check_stream_interleave():
     import collections
     counts = collections.Counter()
     for i in range(10000):
-        counts[tuple(stream_interleaver([[0], [1], [2,2]]))] += 1
+        counts[tuple(random_stream_interleaver([[0], [1], [2,2]]))] += 1
     print(counts)
-    print(''.join(list(stream_interleaver(['aaaa', 'b', 'ccccccccccc']))))
+    print(''.join(list(random_stream_interleaver(['aaaa', 'b', 'ccccccccccc']))))
 # sanity_check_stream_interleave()
 def write_english_story_tinyprompt(story_dict):
-    return f'PROMPT english USER {story_dict["text"]} END'
+    return f'PROMPT english USER {story_dict["text"].strip()} END'
 def write_spanish_story_tinyprompt(story_dict):
-    return f'PROMPT spanish USER {story_dict["story"]} END'
+    return f'PROMPT spanish USER {story_dict["story"].strip()} END'
 
 def paragraph_splitter(text):
     return [t.strip() for t in text.split('\n') if t.strip()]
@@ -52,11 +52,12 @@ def write_translation_story_tinyprompt(story_dict):
     translation_paragraphs = paragraph_splitter(translation)
 
     if len(spanish_paragraphs) != len(translation_paragraphs):
+        # print("count of spanish paragraphs did not match count of translation paragraphs")
         return ''
     
     alternating_paragraphs = ''.join(
         a + '\n' + b + '\n' for a, b in zip(translation_paragraphs, spanish_paragraphs))
-    return f'PROMPT translate USER {alternating_paragraphs} END'
+    return f'PROMPT translate USER {alternating_paragraphs.strip()} END'
 
 # print (paragraph_splitter('hello\n  \nworln\ntwo\nthree'))
 # print(write_translation_story_tinyprompt(tinystories_ds_es_translated['train'][0]))
@@ -79,16 +80,17 @@ class FunctionApplyingIterable:
 # this is part of debugging the fix, weird behavior of dataset slices/field access:  list(FunctionApplyingIterable(tinystories_ds_en['train'], lambda x: x.upper()))os.makedirs(EXPT_NAME, exist_ok=True)
 
 datasets_with_formatters = [
-    ('english', tinystories_ds_en['train'], write_english_story_tinyprompt),
-    ('spanish', tinystories_ds_es['train'], write_spanish_story_tinyprompt),
-    ('translation', tinystories_ds_es_translated['train'], write_translation_story_tinyprompt)
+    ('english', tinystories_ds_en['train'].to_list(), write_english_story_tinyprompt),
+    ('spanish', tinystories_ds_es['train'].to_list(), write_spanish_story_tinyprompt),
+    ('translation', tinystories_ds_es_translated['train'].to_list(), write_translation_story_tinyprompt)
 ]
 
 interleavable_train_streams = []
 for task, ds, formatter in datasets_with_formatters:
     split_index = int(TRAIN_FRACTION * len(ds))
-    interleavable_train_streams.append(FunctionApplyingIterable(ds[split_index:len(ds)], formatter))
-    
+    interleavable_train_streams.append(FunctionApplyingIterable(ds[:split_index], formatter))
+
+os.makedirs(EXPT_NAME, exist_ok=True)
 with open(f'{EXPT_NAME}/train.txt', 'w') as f:
     for story in tqdm(random_stream_interleaver(interleavable_train_streams), desc='writing interleaved stories'):
         f.write(story + '\n')
