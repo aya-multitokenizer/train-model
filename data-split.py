@@ -1,0 +1,103 @@
+EXPT_NAME = 'expt_1'
+TRAIN_FRACTION = 0.9
+
+import datasets
+import os
+from tqdm import tqdm
+import random
+tinystories_ds_es_translated = datasets.load_dataset("robrenaud/multilingual_tinystories", data_files=["stories_00.json"])
+tinystories_ds_en = datasets.load_dataset("roneneldan/TinyStories")
+raw_es_stories = [f'stories_{i:02d}.json' for i in range(1, 22)]
+tinystories_ds_es = datasets.load_dataset("robrenaud/multilingual_tinystories", data_files=raw_es_stories)
+
+print('num translations   ', len(tinystories_ds_es_translated['train']))
+print('num english stories', len(tinystories_ds_es['train']))
+print('num spanish stories', len(tinystories_ds_en['train']))
+def random_stream_interleaver(stream_list):
+    lens = [len(stream) for stream in stream_list]
+    iters = [iter(stream) for stream in stream_list]
+    num_items = sum(lens)
+    while num_items > 0:
+        story_idx = random.randint(0, num_items - 1)
+        cum_sum = 0
+        for i in range(len(lens)):
+            cum_sum += lens[i]
+            if cum_sum > story_idx:
+                break
+        yield next(iters[i])
+        num_items -= 1
+        lens[i] -= 1
+
+def sanity_check_stream_interleave():
+    import collections
+    counts = collections.Counter()
+    for i in range(10000):
+        counts[tuple(stream_interleaver([[0], [1], [2,2]]))] += 1
+    print(counts)
+    print(''.join(list(stream_interleaver(['aaaa', 'b', 'ccccccccccc']))))
+# sanity_check_stream_interleave()
+def write_english_story_tinyprompt(story_dict):
+    return f'PROMPT english USER {story_dict["text"]} END'
+def write_spanish_story_tinyprompt(story_dict):
+    return f'PROMPT spanish USER {story_dict["story"]} END'
+
+def paragraph_splitter(text):
+    return [t.strip() for t in text.split('\n') if t.strip()]
+
+def write_translation_story_tinyprompt(story_dict):
+    spanish_story = story_dict['story']
+    translation = story_dict['translation']
+
+    spanish_paragraphs = paragraph_splitter(spanish_story)
+    translation_paragraphs = paragraph_splitter(translation)
+
+    if len(spanish_paragraphs) != len(translation_paragraphs):
+        return ''
+    
+    alternating_paragraphs = ''.join(
+        a + '\n' + b + '\n' for a, b in zip(translation_paragraphs, spanish_paragraphs))
+    return f'PROMPT translate USER {alternating_paragraphs} END'
+
+# print (paragraph_splitter('hello\n  \nworln\ntwo\nthree'))
+# print(write_translation_story_tinyprompt(tinystories_ds_es_translated['train'][0]))
+def function_applying_iterator(items, func):
+    for item in items:
+        yield func(item)
+
+class FunctionApplyingIterable:
+    def __init__(self, items, func):
+        self.items = items
+        self.func = func
+
+    def __len__(self):
+        return len(self.items)
+
+    def __iter__(self):
+        return function_applying_iterator(self.items, self.func)
+    
+# print(list(FunctionApplyingIterable([1,2,3], lambda x: x + 1)))
+# this is part of debugging the fix, weird behavior of dataset slices/field access:  list(FunctionApplyingIterable(tinystories_ds_en['train'], lambda x: x.upper()))os.makedirs(EXPT_NAME, exist_ok=True)
+
+datasets_with_formatters = [
+    ('english', tinystories_ds_en['train'], write_english_story_tinyprompt),
+    ('spanish', tinystories_ds_es['train'], write_spanish_story_tinyprompt),
+    ('translation', tinystories_ds_es_translated['train'], write_translation_story_tinyprompt)
+]
+
+interleavable_train_streams = []
+for task, ds, formatter in datasets_with_formatters:
+    split_index = int(TRAIN_FRACTION * len(ds))
+    interleavable_train_streams.append(FunctionApplyingIterable(ds[split_index:len(ds)], formatter))
+    
+with open(f'{EXPT_NAME}/train.txt', 'w') as f:
+    for story in tqdm(random_stream_interleaver(interleavable_train_streams), desc='writing interleaved stories'):
+        f.write(story + '\n')
+
+
+for task, ds, formatter in datasets_with_formatters:
+    with open(f'{EXPT_NAME}/test_{task}.txt', 'w') as f:
+        split_index = int(TRAIN_FRACTION * len(ds))
+        for story in tqdm(ds[split_index:len(ds)], desc=f'writing {task} stories'):
+            f.write(formatter(story) + '\n')
+
+
