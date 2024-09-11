@@ -1,4 +1,4 @@
-EXPT_NAME = 'expt_1'
+EXPT_NAME = 'spanish_only'
 TRAIN_FRACTION = 0.9
 
 import datasets
@@ -88,9 +88,9 @@ if __name__ == '__main__':
     print('num spanish stories', len(tinystories_ds_es['train']))
     print('num english stories', len(tinystories_ds_en['train']))
     datasets_with_formatters = [
-        ('english', tinystories_ds_en['train'].to_list(), write_english_story_tinyprompt),
-        ('spanish', tinystories_ds_es['train'].to_list(), write_spanish_story_tinyprompt),
-        ('translation', tinystories_ds_es_translated['train'].to_list(), write_translation_story_tinyprompt)
+       ('english', tinystories_ds_en['train'].to_list(), write_english_story_tinyprompt),
+       ('spanish', tinystories_ds_es['train'].to_list(), write_spanish_story_tinyprompt),
+       ('translation', tinystories_ds_es_translated['train'].to_list(), write_translation_story_tinyprompt)
     ]
 
     interleavable_train_streams = []
